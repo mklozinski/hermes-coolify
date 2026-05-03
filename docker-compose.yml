@@ -1,0 +1,247 @@
+###############################################################################
+# Hermes Agent on Coolify - Docker Compose
+#
+# Self-contained: the gateway image is built from an inline Dockerfile that
+# clones https://github.com/NousResearch/hermes-agent at build time. Set
+# HERMES_REF to pin a tag/sha (default: main; requires "Build without cache"
+# in Coolify to refresh). Full walkthrough in README.md.
+###############################################################################
+
+services:
+  hermes-gateway:
+    build:
+      dockerfile_inline: |
+        FROM python:3.11-slim
+
+        RUN apt-get update && apt-get install -y --no-install-recommends \
+            git curl build-essential ripgrep ffmpeg \
+            && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+            && apt-get install -y --no-install-recommends nodejs \
+            && rm -rf /var/lib/apt/lists/*
+
+        RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+
+        WORKDIR /app
+
+        ARG HERMES_REF=main
+        RUN git clone --recurse-submodules --depth 1 --branch $${HERMES_REF} \
+            https://github.com/NousResearch/hermes-agent.git .
+
+        # Wrap status.py's systemctl call in try/except so the CLI does not
+        # crash inside containers without systemd. Idempotent.
+        RUN echo 'aW1wb3J0IHBhdGhsaWIKcCA9IHBhdGhsaWIuUGF0aCgiaGVybWVzX2NsaS9zdGF0dXMucHkiKQppZiBub3QgcC5leGlzdHMoKToKICAgIHByaW50KCJTS0lQOiBub3QgZm91bmQiKTsgZXhpdCgwKQpzcmMgPSBwLnJlYWRfdGV4dCgpCm9sZCA9ICIiIiAgICBpZiBzeXMucGxhdGZvcm0uc3RhcnRzd2l0aCgnbGludXgnKToKICAgICAgICByZXN1bHQgPSBzdWJwcm9jZXNzLnJ1bigKICAgICAgICAgICAgWyJzeXN0ZW1jdGwiLCAiLS11c2VyIiwgImlzLWFjdGl2ZSIsICJoZXJtZXMtZ2F0ZXdheSJdLAogICAgICAgICAgICBjYXB0dXJlX291dHB1dD1UcnVlLAogICAgICAgICAgICB0ZXh0PVRydWUKICAgICAgICApCiAgICAgICAgaXNfYWN0aXZlID0gcmVzdWx0LnN0ZG91dC5zdHJpcCgpID09ICJhY3RpdmUiCiAgICAgICAgcHJpbnQoZiIgIFN0YXR1czogICAgICB7Y2hlY2tfbWFyayhpc19hY3RpdmUpfSB7J3J1bm5pbmcnIGlmIGlzX2FjdGl2ZSBlbHNlICdzdG9wcGVkJ30iKQogICAgICAgIHByaW50KGYiICBNYW5hZ2VyOiAgICAgIHN5c3RlbWQgKHVzZXIpIikiIiIKbmV3ID0gIiIiICAgIGlmIHN5cy5wbGF0Zm9ybS5zdGFydHN3aXRoKCdsaW51eCcpOgogICAgICAgIHRyeToKICAgICAgICAgICAgcmVzdWx0ID0gc3VicHJvY2Vzcy5ydW4oCiAgICAgICAgICAgICAgICBbInN5c3RlbWN0bCIsICItLXVzZXIiLCAiaXMtYWN0aXZlIiwgImhlcm1lcy1nYXRld2F5Il0sCiAgICAgICAgICAgICAgICBjYXB0dXJlX291dHB1dD1UcnVlLAogICAgICAgICAgICAgICAgdGV4dD1UcnVlCiAgICAgICAgICAgICkKICAgICAgICAgICAgaXNfYWN0aXZlID0gcmVzdWx0LnN0ZG91dC5zdHJpcCgpID09ICJhY3RpdmUiCiAgICAgICAgICAgIHByaW50KGYiICBTdGF0dXM6ICAgICAgICB7Y2hlY2tfbWFyayhpc19hY3RpdmUpfSB7J3J1bm5pbmcnIGlmIGlzX2FjdGl2ZSBlbHNlICdzdG9wcGVkJ30iKQogICAgICAgICAgICBwcmludChmIiAgTWFuYWdlcjogICAgICBzeXN0ZW1kICh1c2VyKSIpCiAgICAgICAgZXhjZXB0IEZpbGVOb3RGb3VuZEVycm9yOgogICAgICAgICAgICBwcmludCgiICBTdGF0dXM6ICAgICAgICh1bmtub3duIC0gc3lzdGVtY3RsIG5vdCBhdmFpbGFibGUpIikKICAgICAgICAgICAgcHJpbnQoIiAgTWFuYWdlcjogICAgICAobm8gaW5pdCBzeXN0ZW0pIikiIiIKaWYgb2xkIG5vdCBpbiBzcmM6CiAgICBwcmludCgiU0tJUDogYWxyZWFkeSBwYXRjaGVkIG9yIGNoYW5nZWQgdXBzdHJlYW0iKTsgZXhpdCgwKQpwLndyaXRlX3RleHQoc3JjLnJlcGxhY2Uob2xkLCBuZXcpKQpwcmludCgiUEFUQ0hFRDogaGVybWVzX2NsaS9zdGF0dXMucHkiKQo=' | base64 -d | python3
+
+        # Add **kwargs to typing-indicator helpers so subclass calls don't crash.
+        RUN sed -i 's/async def _keep_typing(self, chat_id: str, interval: float = 2.0) -> None:/async def _keep_typing(self, chat_id: str, interval: float = 2.0, **kwargs) -> None:/' gateway/platforms/base.py && \
+            sed -i 's/await self.send_typing(chat_id)/await self.send_typing(chat_id, **kwargs)/' gateway/platforms/base.py && \
+            sed -i 's/async def send_typing(self, chat_id: str) -> None:/async def send_typing(self, chat_id: str, **kwargs) -> None:/' gateway/platforms/base.py
+
+        RUN npm install --omit=dev
+
+        RUN /root/.local/bin/uv venv .venv --python 3.11
+        ENV VIRTUAL_ENV=/app/.venv
+        ENV PATH="/app/.venv/bin:$PATH"
+        RUN /root/.local/bin/uv pip install -e ".[all]" || /root/.local/bin/uv pip install -e "."
+
+        RUN if [ -f "mini-swe-agent/pyproject.toml" ]; then /root/.local/bin/uv pip install -e "./mini-swe-agent"; fi && \
+            if [ -f "tinker-atropos/pyproject.toml" ]; then /root/.local/bin/uv pip install -e "./tinker-atropos"; fi
+
+        # Make `hermes` callable from shells with reset PATH (login shells,
+        # Hermes's terminal-tool subprocesses).
+        RUN ln -sf /app/.venv/bin/hermes /usr/local/bin/hermes
+
+        # Persist external CLI tools and their auth across rebuilds:
+        #   HOME              -> dotfiles (~/.codex, ~/.claude, ...) on hermes-data
+        #   NPM_CONFIG_PREFIX -> globally-installed npm CLIs on hermes-data
+        #   HERMES_HOME       -> pins Hermes's own data dir under the HOME override
+        # See README "Persistent CLI tools".
+        ENV HERMES_HOME=/root/.hermes
+        ENV HOME=/root/.hermes/e-tools/home
+        ENV NPM_CONFIG_PREFIX=/root/.hermes/e-tools/npm-global
+        ENV PATH="/root/.hermes/e-tools/npm-global/bin:/app/.venv/bin:/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+        RUN mkdir -p /root/workspace && \
+            mkdir -p /root/.hermes/{skills,memory,memories,logs,sessions,cron,pairing,hooks,image_cache,audio_cache} && \
+            (./.venv/bin/python tools/skills_sync.py 2>/dev/null || \
+             ([ -d "skills" ] && cp -rn skills/* /root/.hermes/skills/ 2>/dev/null || true))
+
+        # On boot: ensure persistent dirs exist, then symlink any persistent
+        # npm-global binaries into /usr/local/bin so they're on default PATH.
+        ENTRYPOINT ["/bin/sh","-c","mkdir -p /root/.hermes/e-tools/npm-global/bin /root/.hermes/e-tools/home && for f in /root/.hermes/e-tools/npm-global/bin/*; do [ -e \"$$f\" ] && ln -sf \"$$f\" /usr/local/bin/; done; exec \"$$@\"","--"]
+        CMD ["/app/.venv/bin/python", "-m", "gateway.run"]
+      args:
+        HERMES_REF: ${HERMES_REF:-main}
+
+    init: true
+    restart: unless-stopped
+
+    volumes:
+      - hermes-data:/root/.hermes
+      - hermes-workspace:/root/workspace
+
+    depends_on:
+      - hermes-browser
+
+    environment:
+      # LLM provider - set ONE of these. See README.
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-}
+      - LLM_MODEL=${LLM_MODEL:-anthropic/claude-sonnet-4.6}
+
+      - GLM_API_KEY=${GLM_API_KEY:-}
+      - GLM_BASE_URL=${GLM_BASE_URL:-}
+      - KIMI_API_KEY=${KIMI_API_KEY:-}
+      - KIMI_BASE_URL=${KIMI_BASE_URL:-}
+      - MINIMAX_API_KEY=${MINIMAX_API_KEY:-}
+      - MINIMAX_BASE_URL=${MINIMAX_BASE_URL:-}
+
+      # Tool API keys (optional)
+      - FIRECRAWL_API_KEY=${FIRECRAWL_API_KEY:-}
+      - FIRECRAWL_API_URL=${FIRECRAWL_API_URL:-}
+      - FAL_KEY=${FAL_KEY:-}
+      - HONCHO_API_KEY=${HONCHO_API_KEY:-}
+      - ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY:-}
+      - VOICE_TOOLS_OPENAI_KEY=${VOICE_TOOLS_OPENAI_KEY:-}
+
+      # Self-hosted browser sidecar. /chromium is browserless v2's CDP path
+      # (the bare / route is not a websocket handler). Coolify-overridable:
+      # set BROWSER_CDP_URL in the env to point elsewhere or empty to disable.
+      - BROWSER_CDP_URL=${BROWSER_CDP_URL:-ws://hermes-browser:3000/chromium?token=${BROWSER_TOKEN:-}}
+
+      # Browserbase cloud option (alternative to the sidecar)
+      - BROWSERBASE_API_KEY=${BROWSERBASE_API_KEY:-}
+      - BROWSERBASE_PROJECT_ID=${BROWSERBASE_PROJECT_ID:-}
+      - BROWSERBASE_PROXIES=${BROWSERBASE_PROXIES:-true}
+      - BROWSERBASE_ADVANCED_STEALTH=${BROWSERBASE_ADVANCED_STEALTH:-false}
+      - BROWSER_SESSION_TIMEOUT=${BROWSER_SESSION_TIMEOUT:-300}
+      - BROWSER_INACTIVITY_TIMEOUT=${BROWSER_INACTIVITY_TIMEOUT:-120}
+
+      # Messaging - configure at least one
+      # Telegram
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - TELEGRAM_ALLOWED_USERS=${TELEGRAM_ALLOWED_USERS:-}
+      - TELEGRAM_HOME_CHANNEL=${TELEGRAM_HOME_CHANNEL:-}
+      - TELEGRAM_HOME_CHANNEL_NAME=${TELEGRAM_HOME_CHANNEL_NAME:-}
+
+      # Discord
+      - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN:-}
+      - DISCORD_ALLOWED_USERS=${DISCORD_ALLOWED_USERS:-}
+      - DISCORD_HOME_CHANNEL=${DISCORD_HOME_CHANNEL:-}
+      - DISCORD_HOME_CHANNEL_NAME=${DISCORD_HOME_CHANNEL_NAME:-}
+
+      # Slack
+      - SLACK_BOT_TOKEN=${SLACK_BOT_TOKEN:-}
+      - SLACK_APP_TOKEN=${SLACK_APP_TOKEN:-}
+      - SLACK_ALLOWED_USERS=${SLACK_ALLOWED_USERS:-}
+      - SLACK_HOME_CHANNEL=${SLACK_HOME_CHANNEL:-}
+
+      # WhatsApp - keep WHATSAPP_ENABLED=false until you scan the QR via
+      # `hermes whatsapp` in the container terminal, then set true and redeploy.
+      - WHATSAPP_ENABLED=${WHATSAPP_ENABLED:-false}
+      - WHATSAPP_ALLOWED_USERS=${WHATSAPP_ALLOWED_USERS:-}
+
+      # Signal - requires external signal-cli-rest-api
+      - SIGNAL_HTTP_URL=${SIGNAL_HTTP_URL:-}
+      - SIGNAL_ACCOUNT=${SIGNAL_ACCOUNT:-}
+      - SIGNAL_ALLOWED_USERS=${SIGNAL_ALLOWED_USERS:-}
+      - SIGNAL_HOME_CHANNEL=${SIGNAL_HOME_CHANNEL:-}
+      - SIGNAL_GROUP_ALLOWED_USERS=${SIGNAL_GROUP_ALLOWED_USERS:-}
+
+      # Home Assistant
+      - HASS_TOKEN=${HASS_TOKEN:-}
+      - HASS_URL=${HASS_URL:-}
+
+      # Gateway-wide allowlist (deny-by-default is safer)
+      - GATEWAY_ALLOW_ALL_USERS=${GATEWAY_ALLOW_ALL_USERS:-false}
+
+      # Terminal backend. Working dir lives in /root/.hermes/config.yaml --
+      # see README "Customizing config.yaml".
+      - TERMINAL_ENV=${TERMINAL_ENV:-local}
+      - TERMINAL_TIMEOUT=${TERMINAL_TIMEOUT:-60}
+      - TERMINAL_LIFETIME_SECONDS=${TERMINAL_LIFETIME_SECONDS:-300}
+      - TERMINAL_SSH_HOST=${TERMINAL_SSH_HOST:-}
+      - TERMINAL_SSH_USER=${TERMINAL_SSH_USER:-}
+      - TERMINAL_SSH_PORT=${TERMINAL_SSH_PORT:-22}
+      - TERMINAL_SSH_KEY=${TERMINAL_SSH_KEY:-}
+
+      # Agent settings
+      - HERMES_MAX_ITERATIONS=${HERMES_MAX_ITERATIONS:-90}
+      - HERMES_INFERENCE_PROVIDER=${HERMES_INFERENCE_PROVIDER:-}
+      - CONTEXT_COMPRESSION_ENABLED=${CONTEXT_COMPRESSION_ENABLED:-true}
+      - CONTEXT_COMPRESSION_THRESHOLD=${CONTEXT_COMPRESSION_THRESHOLD:-0.85}
+      - HERMES_HUMAN_DELAY_MODE=${HERMES_HUMAN_DELAY_MODE:-off}
+      - HERMES_HUMAN_DELAY_MIN_MS=${HERMES_HUMAN_DELAY_MIN_MS:-800}
+      - HERMES_HUMAN_DELAY_MAX_MS=${HERMES_HUMAN_DELAY_MAX_MS:-2500}
+
+      # Auxiliary model overrides (optional)
+      - AUXILIARY_VISION_PROVIDER=${AUXILIARY_VISION_PROVIDER:-}
+      - AUXILIARY_VISION_MODEL=${AUXILIARY_VISION_MODEL:-}
+      - AUXILIARY_WEB_EXTRACT_PROVIDER=${AUXILIARY_WEB_EXTRACT_PROVIDER:-}
+      - AUXILIARY_WEB_EXTRACT_MODEL=${AUXILIARY_WEB_EXTRACT_MODEL:-}
+      - CONTEXT_COMPRESSION_PROVIDER=${CONTEXT_COMPRESSION_PROVIDER:-}
+      - CONTEXT_COMPRESSION_MODEL=${CONTEXT_COMPRESSION_MODEL:-}
+
+      # Optional integrations. Hermes strips these from terminal-subprocess
+      # env by default; see README "Giving Hermes GitHub access" for opt-in.
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+      - TINKER_API_KEY=${TINKER_API_KEY:-}
+      - WANDB_API_KEY=${WANDB_API_KEY:-}
+
+      # Debug
+      - WEB_TOOLS_DEBUG=${WEB_TOOLS_DEBUG:-false}
+      - VISION_TOOLS_DEBUG=${VISION_TOOLS_DEBUG:-false}
+      - MOA_TOOLS_DEBUG=${MOA_TOOLS_DEBUG:-false}
+      - IMAGE_TOOLS_DEBUG=${IMAGE_TOOLS_DEBUG:-false}
+
+    healthcheck:
+      test: ["CMD", "python", "-c", "import hermes_cli; print('ok')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  ###########################################################################
+  # hermes-browser - browserless/chromium v2 (community edition).
+  #
+  # CDP for Hermes (ws://hermes-browser:3000/chromium) and a live debug view
+  # for humans (https://<your-domain>/?token=...) for manual logins on sites
+  # with 2FA/captcha/OAuth. Cookies/sessions persist on the browser-data
+  # volume. Free for self-hosted personal use; commercial use needs a paid
+  # license. See README for setup and quirks.
+  ###########################################################################
+  hermes-browser:
+    image: ghcr.io/browserless/chromium:latest
+    # Run as root: the named volume is root-owned, but browserless's default
+    # non-root user can't write per-session profile dirs there. See README.
+    user: "0:0"
+    restart: unless-stopped
+    shm_size: "2gb"
+    expose:
+      - "3000"
+    environment:
+      # Coolify-magic var: surfaces a "Domains" field for this service.
+      - SERVICE_FQDN_HERMES-BROWSER_3000=
+
+      # Required. Same value as BROWSER_TOKEN in the gateway env.
+      - TOKEN=${BROWSER_TOKEN:-}
+
+      # Keep one Chromium alive across CDP sessions so cookies/logins
+      # survive Hermes connect/disconnect cycles.
+      - KEEP_ALIVE=${BROWSER_KEEP_ALIVE:-true}
+
+      # Persistent profile. Must equal the volume mount target -- the image
+      # does not auto-create subdirectories of /data.
+      - DATA_DIR=/data
+
+      # Resource limits
+      - CONCURRENT=${BROWSER_CONCURRENT:-3}
+      - QUEUED=${BROWSER_QUEUED:-3}
+      - TIMEOUT=${BROWSER_TIMEOUT_MS:-300000}
+    volumes:
+      - browser-data:/data
+
+volumes:
+  hermes-data:
+  hermes-workspace:
+  browser-data:
