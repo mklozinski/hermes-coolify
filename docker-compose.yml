@@ -107,7 +107,7 @@ services:
       # Self-hosted browser sidecar. /chromium is browserless v2's CDP path
       # (the bare / route is not a websocket handler). Coolify-overridable:
       # set BROWSER_CDP_URL in the env to point elsewhere or empty to disable.
-      - BROWSER_CDP_URL=${BROWSER_CDP_URL:-ws://hermes-browser:3000/chromium?token=${BROWSER_TOKEN:-}}
+      - BROWSER_CDP_URL=${BROWSER_CDP_URL:-ws://hermes-browser:3000/chromium?token=${BROWSER_TOKEN}}
 
       # Browserbase cloud option (alternative to the sidecar)
       - BROWSERBASE_API_KEY=${BROWSERBASE_API_KEY:-}
