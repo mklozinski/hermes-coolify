@@ -220,9 +220,6 @@ services:
     expose:
       - "3000"
     environment:
-      # Coolify-magic var: surfaces a "Domains" field for this service.
-      - SERVICE_FQDN_HERMES-BROWSER_3000=
-
       # Required. Same value as BROWSER_TOKEN in the gateway env.
       - TOKEN=${BROWSER_TOKEN:-}
 
