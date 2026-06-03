@@ -23,7 +23,7 @@ The image is built from an inline Dockerfile that clones the upstream Hermes rep
 4. Click **Deploy**. The first build takes ~3-10 minutes (mostly the Python venv install).
 5. Tail the container logs - you should see the gateway start and platform-specific connect lines (e.g. `Telegram bot @<name> online`).
 
-No inbound ports need to be exposed: the gateway dials messaging APIs outbound. Use Coolify's built-in container terminal for any interactive flows (e.g. WhatsApp QR pairing).
+No inbound ports need to be exposed for messaging: the gateway dials messaging APIs outbound. Use Coolify's built-in container terminal for any interactive flows (e.g. WhatsApp QR pairing). The one exception is [inbound webhooks](#inbound-webhooks), which need a public domain routed to port 8644.
 
 ## Required environment variables
 
@@ -120,6 +120,71 @@ Signal uses an external [signal-cli-rest-api](https://github.com/bbernhard/signa
 
 1. In Home Assistant, create a **Long-Lived Access Token** (Profile &rarr; Security).
 2. Set `HASS_TOKEN` and `HASS_URL` (e.g. `http://homeassistant.local:8123`).
+
+## Inbound webhooks
+
+Hermes can run an HTTP server that turns inbound POSTs into agent runs (e.g. trigger Hermes from your own SaaS, GitHub, GitLab, or any system that can send a signed webhook). It listens on `0.0.0.0:8644` inside the container.
+
+### 1. Enable it (Coolify env)
+
+```sh
+WEBHOOK_ENABLED=true
+WEBHOOK_PORT=8644
+WEBHOOK_SECRET=<long-random-string>   # e.g. openssl rand -hex 32
+```
+
+`WEBHOOK_SECRET` is the global HMAC fallback secret for routes that don't set their own. Treat it like a password.
+
+### 2. Expose it publicly (Coolify domain)
+
+The compose `expose: ["8644"]` on `hermes-gateway` makes Coolify surface a **Domains** field for the service. **Do not** publish the port with `ports:` — that bypasses Coolify's proxy and gives you no TLS.
+
+1. In Coolify → `hermes-gateway` service → **Domains**, enter `https://hermes-webhook.yourdomain.com:8644`. The `:8644` tells Coolify's Traefik proxy which internal container port to route to.
+2. Point a DNS A-record for that name at your Coolify host. Coolify auto-issues a Let's Encrypt cert.
+3. **Redeploy.**
+
+Verify: `curl https://hermes-webhook.yourdomain.com/health` should return OK (the `/health` route is unauthenticated). If you get a **502**, the proxy reached the container but the webhook server wasn't listening on `0.0.0.0` — set `webhook.host: 0.0.0.0` in `config.yaml` (see [Customizing config.yaml](#customizing-configyaml)) and restart.
+
+### 3. Define a route
+
+Routes map a URL path to an agent action. Create one from the container terminal (persists on the `hermes-data` volume):
+
+```sh
+hermes webhook add <route-name>      # see `hermes webhook --help` for options
+hermes webhook list
+```
+
+The endpoint is then `https://hermes-webhook.yourdomain.com/webhooks/<route-name>`.
+
+### 4. Call it from your SaaS
+
+Sign the **raw request body** with HMAC-SHA256 using `WEBHOOK_SECRET` (or the route's own secret) and send the hex digest in the `X-Webhook-Signature` header:
+
+```js
+const crypto = require("crypto");
+const body = JSON.stringify({ /* your payload */ });
+const sig = crypto.createHmac("sha256", process.env.WEBHOOK_SECRET).update(body).digest("hex");
+
+await fetch("https://hermes-webhook.yourdomain.com/webhooks/my-route", {
+  method: "POST",
+  headers: { "Content-Type": "application/json", "X-Webhook-Signature": sig },
+  body,
+});
+```
+
+(GitHub uses `X-Hub-Signature-256: sha256=<hex>`; GitLab uses `X-Gitlab-Token: <secret>` — Hermes auto-detects the source.)
+
+Responses to the caller:
+
+| Code | Meaning |
+| --- | --- |
+| `200` | `{"status": "delivered"}` — accepted and dispatched |
+| `401` | Missing/invalid signature |
+| `404` | Unknown route name |
+| `429` | Rate limited (default 30 req/min) |
+| `502` | Target adapter failed |
+
+> **Round-trip note.** The `200` is an *acknowledgement*, not the agent's result — the HTTP call returns as soon as the run is dispatched, not when it finishes. The agent's actual output is delivered to whatever destination the route is configured for (a messaging channel, back to the source like a GitHub PR comment, etc.). If your SaaS needs the result back, configure the route to call *your* SaaS's webhook endpoint, rather than expecting it in the synchronous HTTP response. See the upstream [webhooks docs](https://hermes-agent.nousresearch.com/docs/user-guide/messaging/webhooks/) and the bundled `webhook-subscriptions` skill for route configuration details.
 
 ## Updating to latest
 

@@ -75,6 +75,13 @@ services:
     init: true
     restart: unless-stopped
 
+    # Webhook HTTP server. The port is reachable inside the Docker network
+    # without this line, but `expose` makes Coolify surface a "Domains" field
+    # for the gateway so you can route a public HTTPS domain to port 8644.
+    # See README "Inbound webhooks".
+    expose:
+      - "8644"
+
     volumes:
       - hermes-data:/root/.hermes
       - hermes-workspace:/root/workspace
@@ -151,6 +158,18 @@ services:
       # Home Assistant
       - HASS_TOKEN=${HASS_TOKEN:-}
       - HASS_URL=${HASS_URL:-}
+
+      # Inbound webhooks - HTTP server for event-driven agent runs. Binds
+      # 0.0.0.0:8644 inside the container. To expose it publicly, attach a
+      # domain to this service in Coolify pointing at port 8644 (the `expose`
+      # line above surfaces the Domains field). Routes live at
+      # /webhooks/<route-name>; /health is unauthenticated. WEBHOOK_SECRET is
+      # the global HMAC fallback secret - external callers sign the raw body
+      # with HMAC-SHA256 and send it in the X-Webhook-Signature header.
+      # See README "Inbound webhooks".
+      - WEBHOOK_ENABLED=${WEBHOOK_ENABLED:-false}
+      - WEBHOOK_PORT=${WEBHOOK_PORT:-8644}
+      - WEBHOOK_SECRET=${WEBHOOK_SECRET:-}
 
       # Gateway-wide allowlist (deny-by-default is safer)
       - GATEWAY_ALLOW_ALL_USERS=${GATEWAY_ALLOW_ALL_USERS:-false}
