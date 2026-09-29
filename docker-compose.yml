@@ -36,7 +36,12 @@ services:
             sed -i 's/await self.send_typing(chat_id)/await self.send_typing(chat_id, **kwargs)/' gateway/platforms/base.py && \
             sed -i 's/async def send_typing(self, chat_id: str) -> None:/async def send_typing(self, chat_id: str, **kwargs) -> None:/' gateway/platforms/base.py
 
-        RUN npm install --omit=dev
+        # Root deps only. The repo root is an npm workspace (apps/desktop,
+        # web, ui-tui, tests-js); installing all of it pulls the desktop app's
+        # get-windows native module, whose install script fails on Linux
+        # under --omit=dev (node-pre-gyp not found). The gateway needs none of
+        # the workspaces; upstream's own image skips apps/* as well.
+        RUN npm install --omit=dev --workspaces=false
 
         RUN /root/.local/bin/uv venv .venv --python 3.11
         ENV VIRTUAL_ENV=/app/.venv
