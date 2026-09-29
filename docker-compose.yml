@@ -11,7 +11,10 @@ services:
   hermes-gateway:
     build:
       dockerfile_inline: |
-        FROM python:3.11-slim
+        # Match upstream's .python-version: every core dependency in
+        # pyproject.toml is gated on python_version >= '3.14', so an older
+        # interpreter installs without them and the gateway crashes on import.
+        FROM python:3.14-slim
 
         RUN apt-get update && apt-get install -y --no-install-recommends \
             git curl build-essential ripgrep ffmpeg \
@@ -43,10 +46,12 @@ services:
         # the workspaces; upstream's own image skips apps/* as well.
         RUN npm install --omit=dev --workspaces=false
 
-        RUN /root/.local/bin/uv venv .venv --python 3.11
+        RUN /root/.local/bin/uv venv .venv --python 3.14
         ENV VIRTUAL_ENV=/app/.venv
         ENV PATH="/app/.venv/bin:$PATH"
-        RUN /root/.local/bin/uv pip install -e ".[all]" || /root/.local/bin/uv pip install -e "."
+        # [messaging] (Telegram/Discord/Slack adapters) is no longer part of
+        # [all]; upstream's image installs it alongside.
+        RUN /root/.local/bin/uv pip install -e ".[all,messaging]" || /root/.local/bin/uv pip install -e "."
 
         RUN if [ -f "mini-swe-agent/pyproject.toml" ]; then /root/.local/bin/uv pip install -e "./mini-swe-agent"; fi && \
             if [ -f "tinker-atropos/pyproject.toml" ]; then /root/.local/bin/uv pip install -e "./tinker-atropos"; fi
