@@ -56,6 +56,12 @@ services:
         RUN if [ -f "mini-swe-agent/pyproject.toml" ]; then /root/.local/bin/uv pip install -e "./mini-swe-agent"; fi && \
             if [ -f "tinker-atropos/pyproject.toml" ]; then /root/.local/bin/uv pip install -e "./tinker-atropos"; fi
 
+        # External Hindsight memory plugin clients belong in the gateway's
+        # interpreter, not only in a separately managed interactive CLI venv.
+        # No Hindsight server, PostgreSQL, torch, or CUDA packages are installed.
+        RUN /root/.local/bin/uv pip install --python /app/.venv/bin/python \
+            "hindsight-client==0.10.2" "hindsight-embed==0.10.2"
+
         # Make `hermes` callable from shells with reset PATH (login shells,
         # Hermes's terminal-tool subprocesses).
         RUN ln -sf /app/.venv/bin/hermes /usr/local/bin/hermes
