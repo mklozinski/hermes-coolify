@@ -48,13 +48,21 @@ services:
 
         RUN /root/.local/bin/uv venv .venv --python 3.14
         ENV VIRTUAL_ENV=/app/.venv
-        ENV PATH="/app/.venv/bin:$PATH"
+        ENV PATH="/app/.venv/bin:$$PATH"
         # [messaging] (Telegram/Discord/Slack adapters) is no longer part of
         # [all]; upstream's image installs it alongside.
         RUN /root/.local/bin/uv pip install -e ".[all,messaging]" || /root/.local/bin/uv pip install -e "."
 
         RUN if [ -f "mini-swe-agent/pyproject.toml" ]; then /root/.local/bin/uv pip install -e "./mini-swe-agent"; fi && \
             if [ -f "tinker-atropos/pyproject.toml" ]; then /root/.local/bin/uv pip install -e "./tinker-atropos"; fi
+
+        # These pinned Hindsight releases are newer than Hermes's 14-day
+        # dependency cutoff. Exempt only these packages and retain the
+        # cutoff for their dependencies and all other packages.
+        RUN /root/.local/bin/uv pip install --python /app/.venv/bin/python \
+            --exclude-newer-package hindsight-client=false \
+            --exclude-newer-package hindsight-embed=false \
+            "hindsight-client==0.10.2" "hindsight-embed==0.10.2"
 
         # Make `hermes` callable from shells with reset PATH (login shells,
         # Hermes's terminal-tool subprocesses).
