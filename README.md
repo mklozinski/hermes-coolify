@@ -389,6 +389,45 @@ The same pattern works for any other secret env var Hermes blocks by default —
 | Bot replies but to nobody | User not in allowlist. | Add the user's ID/number to the relevant `*_ALLOWED_USERS` var, or set `GATEWAY_ALLOW_ALL_USERS=true` (not recommended). |
 | Upstream fix not picked up | Docker cached the `git clone` layer. | Redeploy with **Build without cache**. |
 | `systemctl: command not found` in logs | Older upstream that the patch did not match. | The compose patches `status.py` defensively; if you still see the error, file an issue and pin `HERMES_REF` to the last known-good tag. |
+| SQLite WAL-reset vulnerability warning | Gateway uses an older SQLite library from its Python interpreter. | Deploy the current compose, which uses uv-managed Python 3.14.8 and checks SQLite >= 3.51.3 plus FTS5 during the build. Verify with `/app/.venv/bin/python -c 'import sqlite3; print(sqlite3.sqlite_version)'`. This upgrades the runtime; it does not repair an already invalid database. |
+| `session_reset.mode: both is no longer applied` | Automatic idle/daily resets moved to an optional plugin. | Run `hermes plugins install hermes-session-reset-policy` if you need those resets. Otherwise, remove the obsolete `session_reset.mode` setting; `/new` and `/reset` remain available. |
+
+### Slow messaging startup with Cloudflare MCP
+
+Hermes discovers MCP tools before connecting messaging adapters. A stalled MCP connection can therefore delay Telegram and Discord. Opening `hermes` starts an interactive chat; the gateway starts automatically through the container's command.
+
+For Cloudflare API access, replace the `cloudflare-api` entry under `mcp_servers` in `/root/.hermes/config.yaml` with a native HTTP OAuth connection. Remove that entry's old `command` and `args`, and preserve any unrelated servers and settings:
+
+```yaml
+mcp_servers:
+  cloudflare-api:
+    url: https://mcp.cloudflare.com/mcp
+    auth: oauth
+    connect_timeout: 20
+    enabled: true
+```
+
+Then run this in Coolify's gateway terminal:
+
+```sh
+hermes mcp login cloudflare-api
+```
+
+Open the authorization URL in your browser and approve access. For a remote container, copy the full final redirect URL from the browser's address bar and paste it at Hermes's prompt; the browser may show a localhost connection error. Hermes stores its credentials under `/root/.hermes/mcp-tokens`, which persists on `hermes-data`. The native client requires its own login; it does not automatically reuse a Node proxy's credentials. Restart the container after login and verify Cloudflare tools and messaging connections in the runtime logs. The shorter connection timeout limits startup waiting if Cloudflare is unavailable; it does not fix invalid credentials or network failures.
+
+See [Hermes HTTP OAuth setup](https://hermes-agent.nousresearch.com/docs/user-guide/features/mcp#oauth-authenticated-http-servers) and the [Cloudflare MCP server](https://github.com/cloudflare/mcp).
+
+### Disable an unused Kanban dispatcher and restore secret redaction
+
+If you do not use Kanban, stop its background workers without removing the database:
+
+```sh
+hermes config set kanban.dispatch_in_gateway false
+hermes config set kanban.notify_in_gateway false
+hermes config set security.redact_secrets true
+```
+
+Also change any `HERMES_REDACT_SECRETS=false` setting to `true`, or remove it from `/root/.hermes/.env` and any container environment overrides. Restart the container in Coolify to apply these settings. The config lives on `hermes-data`, so the changes survive redeploys.
 
 ## Credits
 
