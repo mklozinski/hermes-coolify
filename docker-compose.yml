@@ -56,9 +56,10 @@ services:
         RUN if [ -f "mini-swe-agent/pyproject.toml" ]; then /root/.local/bin/uv pip install -e "./mini-swe-agent"; fi && \
             if [ -f "tinker-atropos/pyproject.toml" ]; then /root/.local/bin/uv pip install -e "./tinker-atropos"; fi
 
-        # These pinned Hindsight releases are newer than Hermes's 14-day
-        # dependency cutoff. Exempt only these packages and retain the
-        # cutoff for their dependencies and all other packages.
+        # Install external Hindsight memory plugin clients in the gateway's
+        # interpreter. Exempt these pinned packages from Hermes's 14-day
+        # dependency cutoff while retaining it for their dependencies and
+        # all other packages.
         RUN /root/.local/bin/uv pip install --python /app/.venv/bin/python \
             --exclude-newer-package hindsight-client=false \
             --exclude-newer-package hindsight-embed=false \
