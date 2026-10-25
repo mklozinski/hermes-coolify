@@ -140,7 +140,9 @@ services:
       # Self-hosted browser sidecar. /chromium is browserless v2's CDP path
       # (the bare / route is not a websocket handler). Coolify-overridable:
       # set BROWSER_CDP_URL in the env to point elsewhere or empty to disable.
-      - BROWSER_CDP_URL=${BROWSER_CDP_URL:-ws://hermes-browser:3000/chromium?token=${BROWSER_TOKEN}}
+      # The inner default prevents an unset-token interpolation warning; TOKEN
+      # must still be configured when using the sidecar.
+      - BROWSER_CDP_URL=${BROWSER_CDP_URL-ws://hermes-browser:3000/chromium?token=${BROWSER_TOKEN:-}}
 
       # Browserbase cloud option (alternative to the sidecar)
       - BROWSERBASE_API_KEY=${BROWSERBASE_API_KEY:-}
@@ -256,7 +258,9 @@ services:
   # license. See README for setup and quirks.
   ###########################################################################
   hermes-browser:
-    image: ghcr.io/browserless/chromium:latest
+    build:
+      context: .
+      dockerfile: browser/Dockerfile
     # Run as root: the named volume is root-owned, but browserless's default
     # non-root user can't write per-session profile dirs there. See README.
     user: "0:0"
@@ -267,6 +271,10 @@ services:
     environment:
       # Required. Same value as BROWSER_TOKEN in the gateway env.
       - TOKEN=${BROWSER_TOKEN:-}
+
+      # Optional upstream proxy for Chromium CDP sessions. Empty = direct.
+      # Resolved at runtime by the browser hook, never baked into the image.
+      - BROWSER_PROXY_STRING=${BROWSER_PROXY_STRING:-}
 
       # Keep one Chromium alive across CDP sessions so cookies/logins
       # survive Hermes connect/disconnect cycles.

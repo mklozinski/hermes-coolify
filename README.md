@@ -2,7 +2,7 @@
 
 A self-contained [Coolify](https://coolify.io/) Docker Compose for the [Hermes Agent](https://github.com/NousResearch/hermes-agent) by Nous Research, pre-wired for **Telegram, Discord, WhatsApp, Slack, Signal, and Home Assistant** messaging channels.
 
-The image is built from an inline Dockerfile that clones the upstream Hermes repo at build time, so this repository contains nothing but the compose file and these instructions. Each rebuild fetches the latest source from `main` (see [Updating to latest](#updating-to-latest)).
+The gateway image is built from an inline Dockerfile that clones the upstream Hermes repo at build time. The browser image adds a small optional proxy hook from `browser/`. Use the repository as the build context so these files are available. Fresh uncached gateway builds fetch the latest source from `main` (see [Updating to latest](#updating-to-latest)).
 
 > **Unofficial — not affiliated with Nous Research.** This is a community-maintained deployment recipe. Upstream Hermes is built from `main` by default, so behavior can change between rebuilds. Pin `HERMES_REF` to a tag/sha for anything you depend on (see [Updating to latest](#updating-to-latest)). Tested on Coolify v4.
 
@@ -18,7 +18,7 @@ The image is built from an inline Dockerfile that clones the upstream Hermes rep
 ## Deploy on Coolify
 
 1. In Coolify: **Add new resource &rarr; Docker Compose**.
-2. Either point the resource at this repository, or paste the contents of `docker-compose.yml` directly into Coolify's compose editor.
+2. Point the resource at this repository, using `/` as its base directory and `/docker-compose.yml` as its Compose file. Pasting only the Compose text is insufficient: the browser build also needs the files in `browser/`.
 3. Open the **Environment Variables** tab and set the [required env vars](#required-environment-variables).
 4. Click **Deploy**. The first build takes ~3-10 minutes (mostly the Python venv install).
 5. Tail the container logs - you should see the gateway start and platform-specific connect lines (e.g. `Telegram bot @<name> online`).
@@ -64,7 +64,7 @@ Or, a built-in provider: set the matching pair, e.g. `GLM_API_KEY` + `GLM_BASE_U
 | Group | Variables |
 | --- | --- |
 | Tools | `FIRECRAWL_API_KEY`, `FIRECRAWL_API_URL`, `FAL_KEY`, `HONCHO_API_KEY`, `ELEVENLABS_API_KEY`, `VOICE_TOOLS_OPENAI_KEY` |
-| Browser (self-hosted sidecar) | `BROWSER_TOKEN` (required if using the sidecar), `BROWSER_CDP_URL` (override to point elsewhere or empty to disable), `BROWSER_KEEP_ALIVE` (true), `BROWSER_CONCURRENT` (3), `BROWSER_QUEUED` (3), `BROWSER_TIMEOUT_MS` (300000) |
+| Browser (self-hosted sidecar) | `BROWSER_TOKEN` (required if using the sidecar), `BROWSER_PROXY_STRING` (empty = direct; see below), `BROWSER_CDP_URL` (override to point elsewhere or empty to disable), `BROWSER_KEEP_ALIVE` (true), `BROWSER_CONCURRENT` (3), `BROWSER_QUEUED` (3), `BROWSER_TIMEOUT_MS` (300000) |
 | Browser (Browserbase / agent) | `BROWSERBASE_API_KEY`, `BROWSERBASE_PROJECT_ID`, `BROWSERBASE_PROXIES`, `BROWSERBASE_ADVANCED_STEALTH`, `BROWSER_SESSION_TIMEOUT`, `BROWSER_INACTIVITY_TIMEOUT` |
 | Agent tuning | `HERMES_MAX_ITERATIONS` (90), `CONTEXT_COMPRESSION_ENABLED` (true), `CONTEXT_COMPRESSION_THRESHOLD` (0.85), `HERMES_HUMAN_DELAY_MODE`, `HERMES_HUMAN_DELAY_MIN_MS`, `HERMES_HUMAN_DELAY_MAX_MS` |
 | Auxiliary models | `AUXILIARY_VISION_PROVIDER`, `AUXILIARY_VISION_MODEL`, `AUXILIARY_WEB_EXTRACT_PROVIDER`, `AUXILIARY_WEB_EXTRACT_MODEL`, `CONTEXT_COMPRESSION_PROVIDER`, `CONTEXT_COMPRESSION_MODEL` |
@@ -275,6 +275,40 @@ Already wired automatically by these compose lines:
 ```
 
 Same `BROWSER_TOKEN` is used on both ends. As soon as you set it in Coolify env and redeploy, Hermes can use the browser.
+
+### Optional SOCKS5 / HTTP upstream proxy
+
+Set `BROWSER_PROXY_STRING` in Coolify with **runtime availability** enabled:
+
+```sh
+# No proxy (also the default when unset):
+BROWSER_PROXY_STRING=
+
+# Authenticated SOCKS5 (examples only, not real credentials):
+BROWSER_PROXY_STRING=socks5://username:password@proxy.example:1080
+# A bare username:password@host:port is also interpreted as SOCKS5.
+```
+
+- Empty or whitespace-only values leave Chromium CDP sessions direct, without starting a bridge or modifying their launch options.
+- Nonempty values enable an authenticated upstream proxy for new Chromium CDP/Playwright WebSocket sessions. HTTP/HTTPS proxy URLs are also supported. SOCKS5 destination DNS is performed upstream.
+- Credentials must be URL-encoded if they contain reserved characters (`@`, `#`, `%`, etc.). Keep the value in Coolify secrets, not Git, Docker build arguments, or the CDP URL. Build-time availability is unnecessary.
+- Chromium cannot authenticate directly to SOCKS5. The browser image installs pinned `proxy-chain` dependencies and uses Browserless's `external/before.js` hook to start an HTTP bridge bound **only to loopback inside the browser container**. The browser launch receives only that loopback address, never the upstream credentials.
+- A malformed value prevents browser startup. An unreachable proxy or wrong credentials makes requests fail; it does **not** silently fall back to direct access. QUIC and non-proxied WebRTC UDP are disabled for proxied launches. This is an application-level proxy setting, not a container-wide VPN or a complete leak audit.
+- This hook configures browser-launch WebSocket endpoints used by Hermes. Browserless HTTP automation APIs, direct OS networking, and separately configured external CDP services are outside its scope.
+
+Keep the normal `BROWSER_CDP_URL=ws://hermes-browser:3000/chromium?token=${BROWSER_TOKEN}` value; do not add proxy credentials to it. Rebuild/redeploy the browser image once for this change. Later proxy value changes require recreating the browser container and a fresh browser session; changing an env row cannot change an already running session. Persistent volumes are unchanged.
+
+Verify **from inside the browser** using an IP-check page. Browser logs show only `CDP proxy enabled (loopback bridge)` or `CDP proxy disabled (direct access)`, without the upstream URL.
+
+Local regression checks (no production credentials or external requests):
+
+```sh
+cd browser
+npm ci --ignore-scripts
+npm test
+```
+
+An explicit optional live smoke test is also provided: from a gateway container with the CDP/proxy environment and private network access to the browser, run `RUN_LIVE_BROWSER_PROXY_TEST=1 node test/live-cdp.mjs` from `browser/`. It briefly opens a test bridge on the gateway's private interface, compares isolated direct/proxied CDP contexts, and closes the bridge. It is not part of `npm test`.
 
 ### Optional: disable the sidecar entirely
 
