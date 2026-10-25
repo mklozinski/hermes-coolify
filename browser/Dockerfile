@@ -1,12 +1,10 @@
-# Pin the inspected multi-platform image; update this digest deliberately.
-FROM ghcr.io/browserless/chromium:latest@sha256:f04924f64aec5fcfc35226433d76b749068398b2abf548b2ee8c2c93c0d11e45
+# Maintained Camofox REST service, v1.18.1 (source 39c82094013480b373df6600d44c7f036f58356e).
+# Multi-platform digest: update deliberately alongside the inspected API/env settings.
+FROM ghcr.io/jo-inc/camofox-browser:1.18.1@sha256:cff2c1432b609bde9c9d0b91e5b924dae0799d3c7bc9d468c0bc949325beaf2a
 
-# Chromium cannot authenticate directly to a SOCKS5 proxy. A private loopback
-# HTTP bridge performs upstream authentication; credentials never enter CDP URLs.
-USER root
-COPY browser/package.json browser/package-lock.json /usr/src/app/hermes-proxy/
-RUN cd /usr/src/app/hermes-proxy && npm ci --omit=dev --ignore-scripts --no-audit --no-fund
-COPY browser/proxy-config.mjs /usr/src/app/hermes-proxy/proxy-config.mjs
-COPY browser/before.js /usr/src/app/external/before.js
-# Retain upstream WORKDIR, CMD, Chromium installation and lifecycle handling.
-USER blessuser
+# Only the optional authenticated-proxy adapter is ours; browser/API lifecycle
+# and storage persistence remain owned by the upstream service.
+COPY browser/package.json browser/package-lock.json /opt/hermes-browser/
+RUN cd /opt/hermes-browser && npm ci --omit=dev --ignore-scripts --no-audit --no-fund
+COPY browser/proxy-config.mjs browser/start.mjs /opt/hermes-browser/
+CMD ["node", "--max-old-space-size=256", "/opt/hermes-browser/start.mjs"]
