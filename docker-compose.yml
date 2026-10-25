@@ -65,6 +65,10 @@ services:
             --exclude-newer-package hindsight-embed=false \
             "hindsight-client==0.10.2" "hindsight-embed==0.10.2"
 
+        # WebRTC dependencies for the external Hermes plugin.
+        RUN /root/.local/bin/uv pip install --python /app/.venv/bin/python \
+            "aiortc==1.14.0" "av==16.1.0"
+
         # Make `hermes` callable from shells with reset PATH (login shells,
         # Hermes's terminal-tool subprocesses).
         RUN ln -sf /app/.venv/bin/hermes /usr/local/bin/hermes
@@ -129,6 +133,9 @@ services:
       - HONCHO_API_KEY=${HONCHO_API_KEY:-}
       - ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY:-}
       - VOICE_TOOLS_OPENAI_KEY=${VOICE_TOOLS_OPENAI_KEY:-}
+
+      # Plugin API authentication (optional)
+      - API_SERVER_KEY=${API_SERVER_KEY:-}
 
       # Self-hosted browser sidecar. /chromium is browserless v2's CDP path
       # (the bare / route is not a websocket handler). Coolify-overridable:
