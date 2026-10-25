@@ -3,7 +3,20 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import net from 'node:net';
 import { once } from 'node:events';
+import { spawnSync } from 'node:child_process';
 import { normalizeProxy, proxiedRequestURL, createProxyPolicy } from '../proxy-config.mjs';
+
+test('live launch-logic script refuses an unacknowledged endpoint before networking', () => {
+  const result = spawnSync(process.execPath, [new URL('./live-cdp.mjs', import.meta.url).pathname], {
+    encoding: 'utf8', timeout: 3000,
+    env: { ...process.env, RUN_LIVE_BROWSER_PROXY_TEST: '1', BROWSER_TEST_HOOK_DISABLED: '',
+      BROWSER_CDP_URL: 'ws://invalid.example/?token=mock-secret', BROWSER_PROXY_STRING: 'mock-secret@invalid.example:1080' },
+  });
+  assert.equal(result.error, undefined);
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /requires a hook-disabled endpoint/);
+  assert.ok(!result.stderr.includes('mock-secret'));
+});
 
 for (const raw of ['', ' ', '\t\n']) {
   test(`empty proxy is direct (${JSON.stringify(raw)})`, async () => {

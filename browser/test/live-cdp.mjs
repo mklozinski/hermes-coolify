@@ -1,11 +1,15 @@
-// Explicit live smoke test; not part of npm test. Starts only a temporary
-// bridge on this container's private interface and uses isolated CDP contexts.
+// Launch-logic smoke test against a HOOK-DISABLED endpoint, not built-image
+// acceptance. A proxy-enabled server hook would override both test requests.
+// Starts a temporary bridge on this container's private interface.
 import { networkInterfaces } from 'node:os';
 import { setTimeout as delay } from 'node:timers/promises';
 import { Server } from 'proxy-chain';
 import { createProxyPolicy, proxiedRequestURL } from '../proxy-config.mjs';
 
 if (process.env.RUN_LIVE_BROWSER_PROXY_TEST !== '1') throw new Error('Live test requires explicit opt-in.');
+if (process.env.BROWSER_TEST_HOOK_DISABLED !== '1') {
+  throw new Error('This launch-logic test requires a hook-disabled endpoint. Set BROWSER_TEST_HOOK_DISABLED=1 only after verifying that prerequisite.');
+}
 const base = process.env.BROWSER_CDP_URL;
 if (!base || !process.env.BROWSER_PROXY_STRING) throw new Error('CDP endpoint and proxy are required.');
 const address = Object.values(networkInterfaces()).flat().find((i) => i.family === 'IPv4' && !i.internal)?.address;

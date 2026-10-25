@@ -308,7 +308,9 @@ npm ci --ignore-scripts
 npm test
 ```
 
-An explicit optional live smoke test is also provided: from a gateway container with the CDP/proxy environment and private network access to the browser, run `RUN_LIVE_BROWSER_PROXY_TEST=1 node test/live-cdp.mjs` from `browser/`. It briefly opens a test bridge on the gateway's private interface, compares isolated direct/proxied CDP contexts, and closes the bridge. It is not part of `npm test`.
+The optional `test/live-cdp.mjs` script tests **launch logic against a hook-disabled Browserless endpoint only**. It is not built-image acceptance: a proxy-enabled server hook overrides both the script's direct request and its explicit test proxy. After independently verifying a hook-disabled endpoint with no preconfigured proxy launch flags, run `RUN_LIVE_BROWSER_PROXY_TEST=1 BROWSER_TEST_HOOK_DISABLED=1 node test/live-cdp.mjs` from `browser/` in a gateway container with the CDP/proxy environment and private network access to the browser. It briefly opens a bridge on the gateway's private interface, compares isolated direct/proxied CDP contexts, and closes the bridge. It is not part of `npm test`.
+
+**Built-image acceptance is a separate check.** Prefer two disposable browser instances on a private test network, without production profile volumes: one with `BROWSER_PROXY_STRING=` and one with a valid proxy value. Connect to each instance's ordinary `/chromium?token=...` endpoint without client-supplied launch flags. Verify its startup mode log and open the same public HTTPS IP-check page in each browser: the empty instance must show direct egress and the proxy instance must show the expected proxy egress. Repeat against an instance configured with deliberately wrong credentials; navigation must fail rather than show the direct IP. Confirm that logs and CDP/session URLs contain no upstream credentials. Only claim image-level acceptance after these checks run on the built image. Do not use the launch-logic script to bypass a proxy-enabled instance's policy, and do not recreate production merely to run this test without deployment approval.
 
 ### Optional: disable the sidecar entirely
 
