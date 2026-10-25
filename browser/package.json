@@ -1,0 +1,7 @@
+{
+  "name": "hermes-browser-proxy",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": { "proxy-chain": "3.0.1" }
+}

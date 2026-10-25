@@ -10,6 +10,7 @@
 services:
   hermes-gateway:
     build:
+      context: .
       dockerfile_inline: |
         # Match upstream's .python-version: every core dependency in
         # pyproject.toml is gated on python_version >= '3.14', so an older
@@ -88,9 +89,10 @@ services:
             (./.venv/bin/python tools/skills_sync.py 2>/dev/null || \
              ([ -d "skills" ] && cp -rn skills/* /root/.hermes/skills/ 2>/dev/null || true))
 
-        # On boot: ensure persistent dirs exist, then symlink any persistent
-        # npm-global binaries into /usr/local/bin so they're on default PATH.
-        ENTRYPOINT ["/bin/sh","-c","mkdir -p /root/.hermes/e-tools/npm-global/bin /root/.hermes/e-tools/home && for f in /root/.hermes/e-tools/npm-global/bin/*; do [ -e \"$$f\" ] && ln -sf \"$$f\" /usr/local/bin/; done; exec \"$$@\"","--"]
+        # Bootstrap the official Camofox plugin in the mounted home on first
+        # boot, without replacing existing config, plugins or CLI tools.
+        COPY browser/gateway-entrypoint.sh /usr/local/bin/hermes-entrypoint
+        ENTRYPOINT ["/bin/sh", "/usr/local/bin/hermes-entrypoint"]
         CMD ["/app/.venv/bin/python", "-m", "gateway.run"]
       args:
         HERMES_REF: ${HERMES_REF:-main}
@@ -110,7 +112,8 @@ services:
       - hermes-workspace:/root/workspace
 
     depends_on:
-      - hermes-browser
+      hermes-browser:
+        condition: service_healthy
 
     environment:
       # LLM provider - set ONE of these. See README.
@@ -137,10 +140,9 @@ services:
       # Plugin API authentication (optional)
       - API_SERVER_KEY=${API_SERVER_KEY:-}
 
-      # Self-hosted browser sidecar. /chromium is browserless v2's CDP path
-      # (the bare / route is not a websocket handler). Coolify-overridable:
-      # set BROWSER_CDP_URL in the env to point elsewhere or empty to disable.
-      - BROWSER_CDP_URL=${BROWSER_CDP_URL:-ws://hermes-browser:3000/chromium?token=${BROWSER_TOKEN}}
+      # Official Camofox plugin uses REST, not Chromium CDP.
+      - CAMOFOX_URL=http://hermes-browser:9377
+      - CAMOFOX_API_KEY=${BROWSER_TOKEN:?Set BROWSER_TOKEN to a long random secret}
 
       # Browserbase cloud option (alternative to the sidecar)
       - BROWSERBASE_API_KEY=${BROWSERBASE_API_KEY:-}
@@ -247,41 +249,38 @@ services:
       start_period: 60s
 
   ###########################################################################
-  # hermes-browser - browserless/chromium v2 (community edition).
-  #
-  # CDP for Hermes (ws://hermes-browser:3000/chromium) and a live debug view
-  # for humans (https://<your-domain>/?token=...) for manual logins on sites
-  # with 2FA/captcha/OAuth. Cookies/sessions persist on the browser-data
-  # volume. Free for self-hosted personal use; commercial use needs a paid
-  # license. See README for setup and quirks.
+  # Maintained Camofox REST service. Internal API only; no published host port.
+  # BROWSER_TOKEN protects the whole API, not just cookie-import endpoints.
   ###########################################################################
   hermes-browser:
-    image: ghcr.io/browserless/chromium:latest
-    # Run as root: the named volume is root-owned, but browserless's default
-    # non-root user can't write per-session profile dirs there. See README.
-    user: "0:0"
+    build:
+      context: .
+      dockerfile: browser/Dockerfile
+    init: true
     restart: unless-stopped
     shm_size: "2gb"
     expose:
-      - "3000"
+      - "9377"
     environment:
-      # Required. Same value as BROWSER_TOKEN in the gateway env.
-      - TOKEN=${BROWSER_TOKEN:-}
+      - CAMOFOX_ACCESS_KEY=${BROWSER_TOKEN:?Set BROWSER_TOKEN to a long random secret}
+      - CAMOFOX_API_KEY=${BROWSER_TOKEN:?Set BROWSER_TOKEN to a long random secret}
+      - CAMOFOX_BIND_HOST=0.0.0.0
+      - CAMOFOX_PROFILE_DIR=/data/profiles
+      - CAMOFOX_CRASH_REPORT_ENABLED=false
 
-      # Keep one Chromium alive across CDP sessions so cookies/logins
-      # survive Hermes connect/disconnect cycles.
-      - KEEP_ALIVE=${BROWSER_KEEP_ALIVE:-true}
+      # Empty = direct. Bare user:password@host:port means SOCKS5.
+      # Explicit socks5://, socks5h://, http:// and https:// URLs also work.
+      - BROWSER_PROXY_STRING=${BROWSER_PROXY_STRING:-}
 
-      # Persistent profile. Must equal the volume mount target -- the image
-      # does not auto-create subdirectories of /data.
-      - DATA_DIR=/data
-
-      # Resource limits
-      - CONCURRENT=${BROWSER_CONCURRENT:-3}
-      - QUEUED=${BROWSER_QUEUED:-3}
-      - TIMEOUT=${BROWSER_TIMEOUT_MS:-300000}
     volumes:
       - browser-data:/data
+    stop_grace_period: 60s
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:9377/health').then(async r => { if (!r.ok || !(await r.json()).ok) process.exit(1); }).catch(() => process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
 volumes:
   hermes-data:
