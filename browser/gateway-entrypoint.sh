@@ -15,4 +15,8 @@ if [ -n "${CAMOFOX_URL:-}" ] && [ ! -e "${HERMES_HOME:-/root/.hermes}/plugins/ca
         --yes-deps --enable
 fi
 
+if [ -f "${HERMES_HOME:-/root/.hermes}/runtime-patches/apply.py" ]; then
+    /usr/local/bin/python3 "${HERMES_HOME:-/root/.hermes}/runtime-patches/apply.py" --root /app
+fi
+
 exec "$@"
