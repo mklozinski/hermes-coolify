@@ -51,12 +51,12 @@ services:
             sed -i 's/await self.send_typing(chat_id)/await self.send_typing(chat_id, **kwargs)/' gateway/platforms/base.py && \
             sed -i 's/async def send_typing(self, chat_id: str) -> None:/async def send_typing(self, chat_id: str, **kwargs) -> None:/' gateway/platforms/base.py
 
-        # Root deps only. The repo root is an npm workspace (apps/desktop,
-        # web, ui-tui, tests-js); installing all of it pulls the desktop app's
-        # get-windows native module, whose install script fails on Linux
-        # under --omit=dev (node-pre-gyp not found). The gateway needs none of
-        # the workspaces; upstream's own image skips apps/* as well.
-        RUN npm install --omit=dev --workspaces=false
+        # No root Node install. Upstream moved to pnpm and refuses npm on
+        # purpose (engines.npm is an invalid range + engine-strict in .npmrc),
+        # so `npm install` fails with EBADENGINE. The root's only runtime deps
+        # (js-yaml, semver) are used by tests-js, not the gateway, and
+        # upstream's own runtime image ships no root node_modules either.
+        # Node itself stays installed above for MCP servers and npx tools.
 
         RUN /root/.local/bin/uv venv .venv --python /usr/local/bin/python3.14 && \
             .venv/bin/python -c "import sqlite3; print('SQLite:', sqlite3.sqlite_version); assert sqlite3.sqlite_version_info >= (3, 51, 3), sqlite3.sqlite_version"
