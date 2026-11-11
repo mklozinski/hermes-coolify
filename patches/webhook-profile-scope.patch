@@ -1,0 +1,80 @@
+Webhook fixes for Hermes Agent, applied at image build time.
+
+1. Bare webhook routes (/webhooks/<route>, no /p/<profile>/ prefix) run
+   inside the owning profile's runtime scope whenever the multiplex secret
+   guard is active, instead of with no scope. Under profile multiplexing
+   that is the default profile; otherwise the gateway's launch profile.
+2. A route may set `script_timeout` (seconds) to override the adapter-wide
+   script timeout for its filter script.
+
+The Dockerfile applies every patches/*.patch with `git apply`. A patch that
+upstream already contains is skipped; one that no longer fits is skipped with
+a warning and the build continues.
+
+--- a/gateway/platforms/webhook.py
++++ b/gateway/platforms/webhook.py
+@@ -522,14 +522,23 @@
+             return False
+         return configured.strip() == (request_profile or "default")
+ 
+-    @staticmethod
+-    def _profile_scope(profile: Optional[str]):
+-        """Runtime scope for a resolved ``/p/<profile>/`` prefix; bare routes get a no-op."""
++    def _profile_scope(self, profile: Optional[str]):
++        """Bind the route owner, including bare routes while the fail-closed guard is active."""
+         if not profile or not isinstance(profile, str):
+-            return nullcontext()
++            from agent.secret_scope import is_multiplex_active
++            if not is_multiplex_active():
++                return nullcontext()
++            from hermes_constants import get_default_hermes_root, get_routing_process_hermes_home
++            cfg = getattr(self.gateway_runner, "config", None)
++            # Multiplex owns default even from a named launch; standalone owns its launch home,
++            # never an ambient secondary's ContextVar override.
++            home = (get_default_hermes_root() if getattr(cfg, "multiplex_profiles", False)
++                    else get_routing_process_hermes_home())
++        else:
++            from hermes_cli.profiles import get_profile_dir
++            home = get_profile_dir(profile)
+         from gateway.run import _profile_runtime_scope
+-        from hermes_cli.profiles import get_profile_dir
+-        return _profile_runtime_scope(get_profile_dir(profile))
++        return _profile_runtime_scope(home)
+ 
+     async def _read_authenticated_body(self, request: web.Request, route_name: str,
+                                        route_config: dict) -> tuple[Optional[bytes], Optional[web.Response]]:
+@@ -710,7 +719,8 @@
+                 # Shells out (up to its timeout) — worker thread so the loop isn't blocked; to_thread
+                 # copies contextvars so the profile scope follows.
+                 keep, transformed_payload = await asyncio.to_thread(
+-                    self._route_processor.run_route_script, script, payload)
++                    self._route_processor.run_route_script, script, payload,
++                    script_timeout_seconds=route_config.get("script_timeout"))
+                 if not keep:
+                     logger.info("[webhook] script ignored event=%s route=%s", event_type, route_name)
+                     return web.json_response({"status": "ignored", "reason": "script", "route": route_name})
+--- a/gateway/platforms/webhook_filters.py
++++ b/gateway/platforms/webhook_filters.py
+@@ -166,7 +166,8 @@
+             return False
+         return all(self.filter_matches(spec, payload, event_type, headers) for spec in filters)
+ 
+-    def run_route_script(self, script_value: Any, payload: dict) -> tuple[bool, Optional[dict]]:
++    def run_route_script(self, script_value: Any, payload: dict, *,
++                         script_timeout_seconds: Optional[int] = None) -> tuple[bool, Optional[dict]]:
+         """Run a route script and return (should_continue, transformed_payload).
+ 
+         Non-zero exit, empty/``[SILENT]`` stdout, or a ``[SILENT]``/``__hermes_ignore__`` flag drops the
+@@ -190,9 +191,11 @@
+         try:
+             from tools.environments.local import build_subprocess_env
+             popen_kwargs = {"creationflags": 0x08000000} if sys.platform == "win32" else {}
++            timeout = (self.script_timeout_seconds if script_timeout_seconds is None
++                       else max(1, int(script_timeout_seconds)))
+             result = subprocess.run(
+                 [interpreter, str(path)], input=json.dumps(payload), capture_output=True, text=True, encoding="utf-8", errors="replace",
+-                timeout=self.script_timeout_seconds, cwd=str(path.parent), env=build_subprocess_env(), **popen_kwargs,
++                timeout=timeout, cwd=str(path.parent), env=build_subprocess_env(), **popen_kwargs,
+                 check=False,
+             )
+         except subprocess.TimeoutExpired:

@@ -86,6 +86,22 @@ services:
         # Hermes's terminal-tool subprocesses).
         RUN ln -sf /app/.venv/bin/hermes /usr/local/bin/hermes
 
+        # Fixes to upstream code from this repo's patches/ (see README
+        # "Upstream patches"). `git apply` tolerates small upstream shifts.
+        # A patch upstream already contains is skipped; one that no longer
+        # fits is skipped with a warning so the build still succeeds.
+        COPY patches/ /opt/hermes-coolify/patches/
+        RUN for p in /opt/hermes-coolify/patches/*.patch; do \
+              [ -e "$$p" ] || continue; \
+              if git apply --check "$$p" 2>/dev/null; then \
+                git apply "$$p" && echo "PATCHED: $$p"; \
+              elif git apply --reverse --check "$$p" 2>/dev/null; then \
+                echo "SKIP (already upstream): $$p"; \
+              else \
+                echo "WARNING: $$p no longer applies to this Hermes version; skipped"; \
+              fi; \
+            done
+
         # Persist external CLI tools and their auth across rebuilds:
         #   HOME              -> dotfiles (~/.codex, ~/.claude, ...) on hermes-data
         #   NPM_CONFIG_PREFIX -> globally-installed npm CLIs on hermes-data

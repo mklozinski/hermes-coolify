@@ -57,6 +57,10 @@ Remove the old `BROWSER_CDP_URL` and Browserless-only settings from Coolify. Rem
 
 Global npm tools installed from the gateway terminal use persistent storage. For example, `npm install -g @openai/codex` followed by `codex login --device-auth` keeps its installation and login across rebuilds.
 
+## Upstream patches
+
+Fixes in `patches/` are applied to Hermes during the build. If a newer Hermes version no longer fits one, the build skips it with a warning.
+
 ## Optional webhooks
 
 Set `WEBHOOK_ENABLED=true`, `WEBHOOK_PORT=8644`, and a strong `WEBHOOK_SECRET`. Route a Coolify HTTPS domain to the gateway's port 8644; do not publish an unprotected host port. Configure routes with `hermes webhook add` and follow the [webhook documentation](https://hermes-agent.nousresearch.com/docs/user-guide/messaging/webhooks/).

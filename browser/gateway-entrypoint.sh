@@ -15,8 +15,12 @@ if [ -n "${CAMOFOX_URL:-}" ] && [ ! -e "${HERMES_HOME:-/root/.hermes}/plugins/ca
         --yes-deps --enable
 fi
 
+# Optional operator hot-fix kept in the volume. A failure (e.g. upstream
+# changed the target file) must not stop the gateway from starting.
 if [ -f "${HERMES_HOME:-/root/.hermes}/runtime-patches/apply.py" ]; then
-    /usr/local/bin/python3 "${HERMES_HOME:-/root/.hermes}/runtime-patches/apply.py" --root /app
+    if ! /usr/local/bin/python3 "${HERMES_HOME:-/root/.hermes}/runtime-patches/apply.py" --root /app; then
+        echo "WARNING: ${HERMES_HOME:-/root/.hermes}/runtime-patches/apply.py failed; starting without it" >&2
+    fi
 fi
 
 exec "$@"
